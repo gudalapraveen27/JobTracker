@@ -1,0 +1,10 @@
+import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import api, { errorMessage } from "../api";
+import useAuth from "../context/useAuth";
+export default function Login() {
+  const [form, setForm] = useState({ email: "", password: "" }); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const { login } = useAuth(); const navigate = useNavigate(); const location = useLocation();
+  const submit = async (event) => { event.preventDefault(); setBusy(true); setError(""); try { const { data } = await api.post("/auth/login", form); login(data.token, data.user); const destination = location.state?.from?.pathname || (data.user.role === "recruiter" || data.user.role === "admin" ? "/recruiter" : "/jobs"); navigate(destination, { replace: true }); } catch (err) { setError(errorMessage(err, "Login failed. Check your email and password.")); } finally { setBusy(false); } };
+  return <section className="auth-page"><div className="auth-panel"><p className="eyebrow">Welcome back</p><h1>Log in to JobTracker</h1><p className="auth-intro">Pick up where your next opportunity begins.</p><form onSubmit={submit} className="form-stack"><label>Email address<input type="email" autoComplete="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label><label>Password<input type="password" autoComplete="current-password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="button form-submit" disabled={busy}>{busy ? "Logging in…" : "Log in"}</button></form><p className="auth-switch">New to JobTracker? <Link to="/register">Create an account</Link></p></div><aside className="auth-aside"><span className="aside-mark">“</span><p>A good opportunity deserves a clear path from discovery to application.</p><span className="aside-caption">YOUR SEARCH, IN ONE PLACE</span></aside></section>;
+}
