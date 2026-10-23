@@ -18,10 +18,10 @@ const authLimiter = rateLimit({
 });
 
 
-// REGISTER
+ // REGISTER
 router.post("/register", authLimiter, async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, role } = req.body;
 
         // Check required fields
         if (!name || !email || !password) {
@@ -29,9 +29,22 @@ router.post("/register", authLimiter, async (req, res) => {
                 message: "Name, email and password are required"
             });
         }
+        // Allow only jobseeker or recruiter registration
+        const allowedRoles = ["jobseeker", "recruiter"];
+
+        if (role && !allowedRoles.includes(role)) {
+            return res.status(400).json({
+                message: "Invalid role. Choose jobseeker or recruiter."
+            });
+        }
+
+        // Default to jobseeker if no role is provided
+        const selectedRole = role || "jobseeker";
 
         // Check if user already exists
-        const existingUser = await User.findOne({ email });
+        const existingUser = await User.findOne({
+            email: email.trim().toLowerCase()
+        });
 
         if (existingUser) {
             return res.status(400).json({
@@ -42,15 +55,15 @@ router.post("/register", authLimiter, async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user
+        // Create user with selected role
         const user = await User.create({
-            name,
-            email,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
             password: hashedPassword,
-            role: "jobseeker"
+            role: selectedRole
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             message: "User registered successfully",
             user: {
                 id: user._id,
@@ -67,7 +80,10 @@ router.post("/register", authLimiter, async (req, res) => {
             });
         }
 
-        if (error.name === "ValidationError" || error.name === "CastError") {
+        if (
+            error.name === "ValidationError" ||
+            error.name === "CastError"
+        ) {
             return res.status(400).json({
                 message: "Invalid registration details"
             });
@@ -75,7 +91,7 @@ router.post("/register", authLimiter, async (req, res) => {
 
         console.error(error);
 
-        res.status(500).json({
+        return res.status(500).json({
             message: "Server error"
         });
     }
