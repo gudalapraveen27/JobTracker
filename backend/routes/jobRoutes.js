@@ -5,6 +5,10 @@ const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
 
 const router = express.Router();
+// Treat user input as literal text, not a regex pattern
+function escapeRegex(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // CREATE JOB
 router.post(
@@ -67,62 +71,104 @@ router.post(
     });
 
 // GET ALL JOBS
+
 router.get("/", async (req, res) => {
     try {
         const {
-            search,
-            location,
+            search = "",
+            location = "",
             jobType,
-            page = 1,
-            limit = 10
+            page = "1",
+            limit = "10"
         } = req.query;
 
-        // Build search filter
+        // Validate query parameter types and lengths
+        if (
+            typeof search !== "string" ||
+            typeof location !== "string" ||
+            search.length > 100 ||
+            location.length > 100
+        ) {
+            return res.status(400).json({
+                message: "Search and location must be strings of at most 100 characters"
+            });
+        }
+
+        // Validate pagination
+        const pageNumber = Number(page);
+        const limitNumber = Number(limit);
+
+        if (
+            !/^[1-9]\d*$/.test(String(page)) ||
+            !/^[1-9]\d*$/.test(String(limit)) ||
+            !Number.isSafeInteger(pageNumber) ||
+            !Number.isSafeInteger(limitNumber) ||
+            limitNumber > 50
+        ) {
+            return res.status(400).json({
+                message: "Page must be positive and limit must be between 1 and 50"
+            });
+        }
+
         const filter = {};
 
-        // Search title, company or description
-        if (search) {
+        // Escape user input before constructing regex queries
+        if (search.trim()) {
+            const safeSearch = escapeRegex(search.trim());
+
             filter.$or = [
-                { title: { $regex: search, $options: "i" } },
-                { company: { $regex: search, $options: "i" } },
-                { description: { $regex: search, $options: "i" } }
+                { title: { $regex: safeSearch, $options: "i" } },
+                { company: { $regex: safeSearch, $options: "i" } },
+                { description: { $regex: safeSearch, $options: "i" } }
             ];
         }
 
-        // Location filter
-        if (location) {
+        if (location.trim()) {
             filter.location = {
-                $regex: location,
+                $regex: escapeRegex(location.trim()),
                 $options: "i"
             };
         }
 
-        // Job type filter
-        if (jobType) {
+        if (jobType !== undefined) {
+            if (typeof jobType !== "string" || jobType.length > 50) {
+                return res.status(400).json({
+                    message: "Invalid job type"
+                });
+            }
+
             filter.jobType = jobType;
         }
 
-        // Pagination
-        const skip = (page - 1) * limit;
+        const skip = (pageNumber - 1) * limitNumber;
 
-        const jobs = await Job.find(filter)
-            .populate("postedBy", "name email")
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(Number(limit));
+        const [jobs, totalJobs] = await Promise.all([
+            Job.find(filter)
+                .populate("postedBy", "name email")
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limitNumber)
+                .maxTimeMS(5000),
 
-        const totalJobs = await Job.countDocuments(filter);
+            Job.countDocuments(filter).maxTimeMS(5000)
+        ]);
 
         res.json({
             jobs,
             pagination: {
-                currentPage: Number(page),
-                totalPages: Math.ceil(totalJobs / limit),
+                currentPage: pageNumber,
+                totalPages: Math.ceil(totalJobs / limitNumber),
                 totalJobs
             }
         });
 
     } catch (error) {
+        if (error.code === 50 || error.name === "MongooseError") {
+            return res.status(503).json({
+                message: "Search took too long. Please try again."
+            });
+        }
+
         console.error(error);
 
         res.status(500).json({
@@ -130,6 +176,7 @@ router.get("/", async (req, res) => {
         });
     }
 });
+
 
 // GET JOBS OWNED BY THE AUTHENTICATED RECRUITER
 router.get(
